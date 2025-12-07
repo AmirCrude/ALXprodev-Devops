@@ -1,0 +1,43 @@
+#!/bin/bash
+
+# Pokémon API URL for Pikachu
+API_URL="https://pokeapi.co/api/v2/pokemon/pikachu"
+JSON_FILE="data.json"
+ERROR_FILE="errors.txt"
+
+# Clear error file
+> "$ERROR_FILE"
+
+echo "Fetching data for Pikachu from the Pokémon API..."
+
+# Make API request
+HTTP_CODE=$(curl -s -o "$JSON_FILE" -w "%{http_code}" "$API_URL")
+
+if [ "$HTTP_CODE" -eq 200 ]; then
+    # Validate JSON (silently)
+    if ./bin/jq.exe -e . >/dev/null 2>&1 < "$JSON_FILE"; then
+        echo "✅ Success! Data saved to $JSON_FILE"
+        echo "File size: $(wc -c < "$JSON_FILE") bytes"
+        
+        # Preview without jq formatting issues
+        echo -e "\nSample data extracted:"
+        echo "Name: $(./bin/jq.exe -r '.name' "$JSON_FILE")"
+        echo "Height: $(./bin/jq.exe -r '.height' "$JSON_FILE") decimeters"
+        echo "Weight: $(./bin/jq.exe -r '.weight' "$JSON_FILE") hectograms"
+        echo "Type: $(./bin/jq.exe -r '.types[0].type.name' "$JSON_FILE")"
+        
+        # Alternative preview that works on Windows
+        echo -e "\nFirst 3 lines of raw JSON:"
+        head -n 3 "$JSON_FILE"
+        
+        exit 0
+    else
+        echo "ERROR: Invalid JSON response" >> "$ERROR_FILE"
+        echo "❌ Error: Invalid JSON response"
+        exit 1
+    fi
+else
+    echo "ERROR: HTTP $HTTP_CODE" >> "$ERROR_FILE"
+    echo "❌ Error: HTTP $HTTP_CODE"
+    exit 1
+fi
