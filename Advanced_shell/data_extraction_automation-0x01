@@ -1,0 +1,34 @@
+#!/bin/bash
+
+# Task 1: Extract Pokémon Data
+# Extract name, height, weight, and type from data.json
+# Format: "Pikachu is of type Electric, weighs 6kg, and is 0.4m tall."
+
+JSON_FILE="data.json"
+
+# Check if data.json exists
+if [ ! -f "$JSON_FILE" ]; then
+    echo "Error: $JSON_FILE not found. Run Task 0 first."
+    exit 1
+fi
+
+# Extract raw data using jq
+NAME=$(./bin/jq.exe -r '.name' "$JSON_FILE")
+HEIGHT_DM=$(./bin/jq.exe -r '.height' "$JSON_FILE")      # decimeters
+WEIGHT_HG=$(./bin/jq.exe -r '.weight' "$JSON_FILE")      # hectograms
+TYPE_RAW=$(./bin/jq.exe -r '.types[0].type.name' "$JSON_FILE")
+
+# Convert units
+# Height: decimeters to meters (divide by 10)
+HEIGHT_M=$(echo "scale=1; $HEIGHT_DM / 10" | bc 2>/dev/null || echo "$HEIGHT_DM" | awk '{printf "%.1f", $1/10}')
+
+# Weight: hectograms to kilograms (divide by 10)
+WEIGHT_KG=$(echo "scale=1; $WEIGHT_HG / 10" | bc 2>/dev/null || echo "$WEIGHT_HG" | awk '{printf "%.1f", $1/10}')
+
+# Capitalize first letter of name and type
+# Using sed for text transformation as required
+NAME_CAPITALIZED=$(echo "$NAME" | sed 's/.*/\u&/')
+TYPE_CAPITALIZED=$(echo "$TYPE_RAW" | sed 's/.*/\u&/')
+
+# Format and output the result
+echo "${NAME_CAPITALIZED} is of type ${TYPE_CAPITALIZED}, weighs ${WEIGHT_KG}kg, and is ${HEIGHT_M}m tall."
