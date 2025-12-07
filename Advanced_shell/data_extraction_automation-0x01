@@ -2,40 +2,37 @@
 
 JSON_FILE="data.json"
 
-# Check if file exists
-if [ ! -f "$JSON_FILE" ]; then
-    echo "Error: $JSON_FILE not found. Run Task 0 first." >&2
-    exit 1
-fi
+[ ! -f "$JSON_FILE" ] && echo "Error: $JSON_FILE not found." >&2 && exit 1
 
-# Extract and process in one go
-./bin/jq.exe -r '.name + " " + (.height|tostring) + " " + (.weight|tostring) + " " + .types[0].type.name' "$JSON_FILE" | \
-awk '{
-    # Get values
-    name = $1
-    height_dm = $2
-    weight_hg = $3
-    type_raw = $4
-    
-    # Convert units
-    height_m = height_dm / 10
-    weight_kg = weight_hg / 10
-    
-    # Format numbers - remove .0 if whole number
-    if (weight_kg == int(weight_kg))
-        formatted_weight = sprintf("%d", weight_kg)
+# Read all values at once
+read name height_dm weight_hg type_raw <<< $(./bin/jq.exe -r '
+    .name + " " + 
+    (.height|tostring) + " " + 
+    (.weight|tostring) + " " + 
+    .types[0].type.name
+' "$JSON_FILE")
+
+# Format height (dm → m)
+formatted_height=$(awk -v h="$height_dm" 'BEGIN {
+    val = h / 10
+    if (val == int(val))
+        printf "%d", val
     else
-        formatted_weight = sprintf("%.1f", weight_kg)
-    
-    if (height_m == int(height_m))
-        formatted_height = sprintf("%d", height_m)
+        printf "%.1f", val
+}')
+
+# Format weight (hg → kg)
+formatted_weight=$(awk -v w="$weight_hg" 'BEGIN {
+    val = w / 10
+    if (val == int(val))
+        printf "%d", val
     else
-        formatted_height = sprintf("%.1f", height_m)
-    
-    # Capitalize first letter
-    name_cap = toupper(substr(name, 1, 1)) substr(name, 2)
-    type_cap = toupper(substr(type_raw, 1, 1)) substr(type_raw, 2)
-    
-    # Output exactly as required
-    print name_cap " is of type " type_cap ", weighs " formatted_weight "kg, and is " formatted_height "m tall."
-}'
+        printf "%.1f", val
+}')
+
+# Capitalize using sed
+name=$(echo "$name" | sed 's/^./\u&/')
+type=$(echo "$type_raw" | sed 's/^./\u&/')
+
+# Output exactly as required
+echo "$name is of type $type, weighs ${formatted_weight}kg, and is ${formatted_height}m tall."
