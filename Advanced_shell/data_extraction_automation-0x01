@@ -1,34 +1,41 @@
 #!/bin/bash
 
-# Task 1: Extract Pokémon Data
-# Extract name, height, weight, and type from data.json
-# Format: "Pikachu is of type Electric, weighs 6kg, and is 0.4m tall."
-
 JSON_FILE="data.json"
 
-# Check if data.json exists
+# Check if file exists
 if [ ! -f "$JSON_FILE" ]; then
-    echo "Error: $JSON_FILE not found. Run Task 0 first."
+    echo "Error: $JSON_FILE not found. Run Task 0 first." >&2
     exit 1
 fi
 
-# Extract raw data using jq
-NAME=$(./bin/jq.exe -r '.name' "$JSON_FILE")
-HEIGHT_DM=$(./bin/jq.exe -r '.height' "$JSON_FILE")      # decimeters
-WEIGHT_HG=$(./bin/jq.exe -r '.weight' "$JSON_FILE")      # hectograms
-TYPE_RAW=$(./bin/jq.exe -r '.types[0].type.name' "$JSON_FILE")
-
-# Convert units
-# Height: decimeters to meters (divide by 10)
-HEIGHT_M=$(echo "scale=1; $HEIGHT_DM / 10" | bc 2>/dev/null || echo "$HEIGHT_DM" | awk '{printf "%.1f", $1/10}')
-
-# Weight: hectograms to kilograms (divide by 10)
-WEIGHT_KG=$(echo "scale=1; $WEIGHT_HG / 10" | bc 2>/dev/null || echo "$WEIGHT_HG" | awk '{printf "%.1f", $1/10}')
-
-# Capitalize first letter of name and type
-# Using sed for text transformation as required
-NAME_CAPITALIZED=$(echo "$NAME" | sed 's/.*/\u&/')
-TYPE_CAPITALIZED=$(echo "$TYPE_RAW" | sed 's/.*/\u&/')
-
-# Format and output the result
-echo "${NAME_CAPITALIZED} is of type ${TYPE_CAPITALIZED}, weighs ${WEIGHT_KG}kg, and is ${HEIGHT_M}m tall."
+# Extract and process in one go
+./bin/jq.exe -r '.name + " " + (.height|tostring) + " " + (.weight|tostring) + " " + .types[0].type.name' "$JSON_FILE" | \
+awk '{
+    # Get values
+    name = $1
+    height_dm = $2
+    weight_hg = $3
+    type_raw = $4
+    
+    # Convert units
+    height_m = height_dm / 10
+    weight_kg = weight_hg / 10
+    
+    # Format numbers - remove .0 if whole number
+    if (weight_kg == int(weight_kg))
+        formatted_weight = sprintf("%d", weight_kg)
+    else
+        formatted_weight = sprintf("%.1f", weight_kg)
+    
+    if (height_m == int(height_m))
+        formatted_height = sprintf("%d", height_m)
+    else
+        formatted_height = sprintf("%.1f", height_m)
+    
+    # Capitalize first letter
+    name_cap = toupper(substr(name, 1, 1)) substr(name, 2)
+    type_cap = toupper(substr(type_raw, 1, 1)) substr(type_raw, 2)
+    
+    # Output exactly as required
+    print name_cap " is of type " type_cap ", weighs " formatted_weight "kg, and is " formatted_height "m tall."
+}'
