@@ -1,6 +1,5 @@
 #!/bin/bash
 
-# Task 2: Batch Pokémon Data Retrieval
 # Fetch data for multiple Pokémon with rate limiting and proper validation
 
 # List of Pokémon to fetch
