@@ -1,0 +1,190 @@
+#!/bin/bash
+
+# Task 5: Parallel Data Fetching
+# Fetch data for multiple Pokémon in parallel using background processes
+
+# List of Pokémon to fetch
+POKEMON_LIST=("bulbasaur" "ivysaur" "venusaur" "charmander" "charmeleon")
+
+# Directory to store Pokémon data
+DATA_DIR="pokemon_data"
+
+# Base API URL
+BASE_URL="https://pokeapi.co/api/v2/pokemon"
+
+# Maximum concurrent processes
+MAX_CONCURRENT=3
+
+# Create data directory
+mkdir -p "$DATA_DIR"
+
+# Arrays to track processes
+declare -a PIDS
+declare -a RESULTS
+declare -A PID_TO_POKEMON
+
+echo "Starting parallel Pokémon data fetching..."
+echo "Maximum concurrent processes: $MAX_CONCURRENT"
+echo "============================================="
+
+# Function to fetch a single Pokémon
+fetch_pokemon() {
+    local pokemon="$1"
+    local output_file="${DATA_DIR}/${pokemon}.json"
+    local pid=$$
+    
+    echo "[PID: $pid] Fetching $pokemon..."
+    
+    # Make API request
+    if curl -s -f --max-time 30 "${BASE_URL}/${pokemon}" -o "$output_file" 2>/dev/null; then
+        # Validate JSON
+        if ./bin/jq.exe -e . >/dev/null 2>&1 < "$output_file"; then
+            echo "[PID: $pid] ✓ $pokemon data saved successfully"
+            return 0
+        else
+            echo "[PID: $pid] ✗ $pokemon: Invalid JSON response"
+            rm -f "$output_file"
+            return 1
+        fi
+    else
+        echo "[PID: $pid] ✗ $pokemon: Failed to fetch"
+        rm -f "$output_file"
+        return 1
+    fi
+}
+
+# Function to wait for free slot in concurrent processes
+wait_for_slot() {
+    while true; do
+        # Count currently running processes from our PIDS array
+        local running=0
+        for pid in "${PIDS[@]}"; do
+            if kill -0 "$pid" 2>/dev/null; then
+                ((running++))
+            fi
+        done
+        
+        # If we have room, break the loop
+        if [ $running -lt $MAX_CONCURRENT ]; then
+            break
+        fi
+        
+        # Wait a bit before checking again
+        sleep 0.5
+    done
+}
+
+# Function to check and clean completed processes
+clean_completed_processes() {
+    local i=0
+    while [ $i -lt ${#PIDS[@]} ]; do
+        local pid=${PIDS[$i]}
+        
+        # Check if process is still running
+        if ! kill -0 "$pid" 2>/dev/null; then
+            # Process completed, get its exit status
+            if wait "$pid" 2>/dev/null; then
+                RESULTS+=("SUCCESS:${PID_TO_POKEMON[$pid]}")
+            else
+                RESULTS+=("FAILED:${PID_TO_POKEMON[$pid]}")
+            fi
+            
+            # Remove from arrays
+            unset PIDS[$i]
+            unset PID_TO_POKEMON[$pid]
+            
+            # Reindex array
+            PIDS=("${PIDS[@]}")
+        fi
+        ((i++))
+    done
+}
+
+# Main execution - launch Pokémon fetches in parallel
+for pokemon in "${POKEMON_LIST[@]}"; do
+    # Wait if we've reached max concurrent processes
+    if [ ${#PIDS[@]} -ge $MAX_CONCURRENT ]; then
+        echo "Maximum concurrent processes reached ($MAX_CONCURRENT). Waiting for slot..."
+        wait_for_slot
+        clean_completed_processes
+    fi
+    
+    echo "Launching fetch for: $pokemon"
+    
+    # Start fetch in background
+    fetch_pokemon "$pokemon" &
+    
+    # Store PID and map to Pokémon name
+    PID=$!
+    PIDS+=($PID)
+    PID_TO_POKEMON[$PID]="$pokemon"
+    
+    echo "  Started with PID: $PID"
+    
+    # Small delay to avoid overwhelming the API
+    sleep 0.2
+done
+
+echo ""
+echo "All Pokémon fetches launched. Waiting for completion..."
+echo ""
+
+# Wait for all remaining processes to complete
+while [ ${#PIDS[@]} -gt 0 ]; do
+    # Check for completed processes
+    clean_completed_processes
+    
+    # Show current status
+    if [ ${#PIDS[@]} -gt 0 ]; then
+        echo -n "Still running: "
+        for pid in "${PIDS[@]}"; do
+            echo -n "${PID_TO_POKEMON[$pid]} (PID:$pid) "
+        done
+        echo ""
+        sleep 1
+    fi
+done
+
+echo ""
+echo "============================================="
+echo "Parallel fetching complete!"
+echo ""
+
+# Count results
+SUCCESS_COUNT=0
+FAIL_COUNT=0
+
+for result in "${RESULTS[@]}"; do
+    if [[ $result == SUCCESS:* ]]; then
+        ((SUCCESS_COUNT++))
+    else
+        ((FAIL_COUNT++))
+    fi
+done
+
+echo "Results summary:"
+echo "Successfully fetched: $SUCCESS_COUNT Pokémon"
+echo "Failed: $FAIL_COUNT Pokémon"
+echo ""
+
+# Show detailed results
+echo "Detailed results:"
+for result in "${RESULTS[@]}"; do
+    status="${result%%:*}"
+    pokemon="${result#*:}"
+    if [ "$status" = "SUCCESS" ]; then
+        echo "  ✓ $pokemon"
+    else
+        echo "  ✗ $pokemon"
+    fi
+done
+
+echo ""
+echo "Files in $DATA_DIR/:"
+ls -la "$DATA_DIR/" 2>/dev/null || echo "  (directory empty)"
+
+if [ $FAIL_COUNT -gt 0 ]; then
+    exit 1
+else
+    exit 0
+fi
