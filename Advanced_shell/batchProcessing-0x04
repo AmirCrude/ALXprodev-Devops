@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Task 5: Parallel Data Fetching
-# Fetch data for multiple Pokémon in parallel using background processes
+# Fetch data for Pokémon in parallel using background jobs
 
 # List of Pokémon to fetch
 POKEMON_LIST=("bulbasaur" "ivysaur" "venusaur" "charmander" "charmeleon")
@@ -12,60 +12,57 @@ DATA_DIR="pokemon_data"
 # Base API URL
 BASE_URL="https://pokeapi.co/api/v2/pokemon"
 
-# Maximum concurrent processes
-MAX_CONCURRENT=3
+# Maximum concurrent jobs
+MAX_JOBS=3
 
 # Create data directory
 mkdir -p "$DATA_DIR"
 
-# Arrays to track processes
-declare -a PIDS
-declare -a RESULTS
-declare -A PID_TO_POKEMON
-
 echo "Starting parallel Pokémon data fetching..."
-echo "Maximum concurrent processes: $MAX_CONCURRENT"
+echo "Maximum concurrent jobs: $MAX_JOBS"
 echo "============================================="
 
+# Array to store job PIDs
+declare -a JOB_PIDS
+
 # Function to fetch a single Pokémon
-fetch_pokemon() {
+fetch_pokemon_job() {
     local pokemon="$1"
     local output_file="${DATA_DIR}/${pokemon}.json"
-    local pid=$$
     
-    echo "[PID: $pid] Fetching $pokemon..."
+    echo "Job for $pokemon started (PID: $$)..."
     
     # Make API request
     if curl -s -f --max-time 30 "${BASE_URL}/${pokemon}" -o "$output_file" 2>/dev/null; then
         # Validate JSON
-        if ./bin/jq.exe -e . >/dev/null 2>&1 < "$output_file"; then
-            echo "[PID: $pid] ✓ $pokemon data saved successfully"
+        if ./bin/jq.exe -e . >/dev/null 2>/dev/null < "$output_file"; then
+            echo "Job for $pokemon completed successfully ✓"
             return 0
         else
-            echo "[PID: $pid] ✗ $pokemon: Invalid JSON response"
+            echo "Job for $pokemon failed: Invalid JSON ✗"
             rm -f "$output_file"
             return 1
         fi
     else
-        echo "[PID: $pid] ✗ $pokemon: Failed to fetch"
+        echo "Job for $pokemon failed: Network error ✗"
         rm -f "$output_file"
         return 1
     fi
 }
 
-# Function to wait for free slot in concurrent processes
-wait_for_slot() {
+# Function to wait for job slots
+wait_for_job_slot() {
     while true; do
-        # Count currently running processes from our PIDS array
-        local running=0
-        for pid in "${PIDS[@]}"; do
-            if kill -0 "$pid" 2>/dev/null; then
-                ((running++))
+        # Count active jobs
+        local active_jobs=0
+        for job_pid in "${JOB_PIDS[@]}"; do
+            if kill -0 "$job_pid" 2>/dev/null; then
+                ((active_jobs++))
             fi
         done
         
-        # If we have room, break the loop
-        if [ $running -lt $MAX_CONCURRENT ]; then
+        # If we have room for more jobs, break
+        if [ $active_jobs -lt $MAX_JOBS ]; then
             break
         fi
         
@@ -74,114 +71,93 @@ wait_for_slot() {
     done
 }
 
-# Function to check and clean completed processes
-clean_completed_processes() {
+# Function to clean completed jobs
+clean_completed_jobs() {
     local i=0
-    while [ $i -lt ${#PIDS[@]} ]; do
-        local pid=${PIDS[$i]}
+    while [ $i -lt ${#JOB_PIDS[@]} ]; do
+        local job_pid=${JOB_PIDS[$i]}
         
-        # Check if process is still running
-        if ! kill -0 "$pid" 2>/dev/null; then
-            # Process completed, get its exit status
-            if wait "$pid" 2>/dev/null; then
-                RESULTS+=("SUCCESS:${PID_TO_POKEMON[$pid]}")
-            else
-                RESULTS+=("FAILED:${PID_TO_POKEMON[$pid]}")
-            fi
-            
-            # Remove from arrays
-            unset PIDS[$i]
-            unset PID_TO_POKEMON[$pid]
-            
-            # Reindex array
-            PIDS=("${PIDS[@]}")
+        # Check if job is still running
+        if ! kill -0 "$job_pid" 2>/dev/null; then
+            # Job completed, wait for it to get exit status
+            wait "$job_pid" 2>/dev/null
+            # Remove from array
+            unset JOB_PIDS[$i]
+            JOB_PIDS=("${JOB_PIDS[@]}")
+        else
+            ((i++))
         fi
-        ((i++))
     done
 }
 
-# Main execution - launch Pokémon fetches in parallel
+# Launch Pokémon fetch jobs
 for pokemon in "${POKEMON_LIST[@]}"; do
-    # Wait if we've reached max concurrent processes
-    if [ ${#PIDS[@]} -ge $MAX_CONCURRENT ]; then
-        echo "Maximum concurrent processes reached ($MAX_CONCURRENT). Waiting for slot..."
-        wait_for_slot
-        clean_completed_processes
+    # Wait for available job slot
+    if [ ${#JOB_PIDS[@]} -ge $MAX_JOBS ]; then
+        echo "Maximum jobs reached ($MAX_JOBS). Waiting for job completion..."
+        wait_for_job_slot
+        clean_completed_jobs
     fi
     
-    echo "Launching fetch for: $pokemon"
+    echo "Launching job for: $pokemon"
     
-    # Start fetch in background
-    fetch_pokemon "$pokemon" &
+    # Start job in background
+    fetch_pokemon_job "$pokemon" &
     
-    # Store PID and map to Pokémon name
-    PID=$!
-    PIDS+=($PID)
-    PID_TO_POKEMON[$PID]="$pokemon"
+    # Store job PID
+    JOB_PID=$!
+    JOB_PIDS+=($JOB_PID)
     
-    echo "  Started with PID: $PID"
+    echo "  Job started with PID: $JOB_PID"
     
-    # Small delay to avoid overwhelming the API
+    # Small delay between job starts
     sleep 0.2
 done
 
 echo ""
-echo "All Pokémon fetches launched. Waiting for completion..."
+echo "All jobs launched. Waiting for all jobs to complete..."
 echo ""
 
-# Wait for all remaining processes to complete
-while [ ${#PIDS[@]} -gt 0 ]; do
-    # Check for completed processes
-    clean_completed_processes
+# Wait for all jobs to finish
+while [ ${#JOB_PIDS[@]} -gt 0 ]; do
+    # Clean completed jobs
+    clean_completed_jobs
     
-    # Show current status
-    if [ ${#PIDS[@]} -gt 0 ]; then
-        echo -n "Still running: "
-        for pid in "${PIDS[@]}"; do
-            echo -n "${PID_TO_POKEMON[$pid]} (PID:$pid) "
+    # Show current job status
+    if [ ${#JOB_PIDS[@]} -gt 0 ]; then
+        echo -n "Active jobs (PIDs): "
+        for job_pid in "${JOB_PIDS[@]}"; do
+            echo -n "$job_pid "
         done
-        echo ""
+        echo "- waiting..."
         sleep 1
     fi
 done
 
 echo ""
 echo "============================================="
-echo "Parallel fetching complete!"
+echo "All jobs completed!"
 echo ""
 
 # Count results
 SUCCESS_COUNT=0
 FAIL_COUNT=0
 
-for result in "${RESULTS[@]}"; do
-    if [[ $result == SUCCESS:* ]]; then
+for pokemon in "${POKEMON_LIST[@]}"; do
+    if [ -f "${DATA_DIR}/${pokemon}.json" ]; then
         ((SUCCESS_COUNT++))
     else
         ((FAIL_COUNT++))
     fi
 done
 
-echo "Results summary:"
-echo "Successfully fetched: $SUCCESS_COUNT Pokémon"
-echo "Failed: $FAIL_COUNT Pokémon"
+echo "Job results summary:"
+echo "Successful jobs: $SUCCESS_COUNT"
+echo "Failed jobs: $FAIL_COUNT"
 echo ""
 
-# Show detailed results
-echo "Detailed results:"
-for result in "${RESULTS[@]}"; do
-    status="${result%%:*}"
-    pokemon="${result#*:}"
-    if [ "$status" = "SUCCESS" ]; then
-        echo "  ✓ $pokemon"
-    else
-        echo "  ✗ $pokemon"
-    fi
-done
-
-echo ""
-echo "Files in $DATA_DIR/:"
-ls -la "$DATA_DIR/" 2>/dev/null || echo "  (directory empty)"
+echo "Files created in $DATA_DIR/:"
+ls -la "$DATA_DIR/" 2>/dev/null || echo "  (no files created)"
 
 if [ $FAIL_COUNT -gt 0 ]; then
     exit 1
