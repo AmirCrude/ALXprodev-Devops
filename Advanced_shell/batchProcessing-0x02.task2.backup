@@ -1,0 +1,68 @@
+#!/bin/bash
+
+# Fetch data for multiple Pokémon with rate limiting and proper validation
+
+# List of Pokémon to fetch
+POKEMON_LIST=("bulbasaur" "ivysaur" "venusaur" "charmander" "charmeleon")
+
+# Directory to store Pokémon data
+DATA_DIR="pokemon_data"
+
+# Base API URL
+BASE_URL="https://pokeapi.co/api/v2/pokemon"
+
+# Create data directory if it doesn't exist
+mkdir -p "$DATA_DIR"
+
+echo "Starting batch Pokémon data retrieval..."
+
+# Counter for success/failure
+SUCCESS_COUNT=0
+FAIL_COUNT=0
+
+# Loop through each Pokémon
+for pokemon in "${POKEMON_LIST[@]}"; do
+    echo "Fetching data for $pokemon..."
+    
+    # Output file path
+    OUTPUT_FILE="${DATA_DIR}/${pokemon}.json"
+    
+    # Make API request with timeout
+    if HTTP_CODE=$(curl -s -o "$OUTPUT_FILE" -w "%{http_code}" --max-time 10 "${BASE_URL}/${pokemon}"); then
+        # Check HTTP status
+        if [ "$HTTP_CODE" -eq 200 ]; then
+            # Validate JSON with jq
+            if ./bin/jq.exe -e . >/dev/null 2>&1 < "$OUTPUT_FILE"; then
+                echo "Saved data to $OUTPUT_FILE ✅"
+                ((SUCCESS_COUNT++))
+            else
+                echo "Failed: Invalid JSON response for $pokemon ❌"
+                rm -f "$OUTPUT_FILE"
+                ((FAIL_COUNT++))
+            fi
+        else
+            echo "Failed: HTTP $HTTP_CODE for $pokemon ❌"
+            rm -f "$OUTPUT_FILE"
+            ((FAIL_COUNT++))
+        fi
+    else
+        echo "Failed: Network error for $pokemon ❌"
+        ((FAIL_COUNT++))
+    fi
+    
+    # Add delay between requests (except after the last one)
+    if [ "$pokemon" != "${POKEMON_LIST[-1]}" ]; then
+        sleep 1
+    fi
+done
+
+echo ""
+echo "Batch retrieval complete!"
+echo "Successfully fetched: $SUCCESS_COUNT Pokémon"
+echo "Failed: $FAIL_COUNT Pokémon"
+
+if [ $FAIL_COUNT -gt 0 ]; then
+    exit 1
+else
+    exit 0
+fi
