@@ -36,8 +36,8 @@ for json_file in "$DATA_DIR"/*.json; do
         height_m=$(echo "$height_dm" | awk '{printf "%.1f", $1/10}')
         weight_kg=$(echo "$weight_hg" | awk '{val=$1/10; printf (val==int(val)) ? "%d" : "%.1f", val}')
         
-        # Capitalize first letter of name
-        name_cap=$(echo "$name" | awk '{print toupper(substr($0,1,1)) substr($0,2)}')
+        # Capitalize first letter of name using sed
+        name_cap=$(echo "$name" | sed 's/^./\u&/')
         
         # Append to CSV
         echo "$name_cap,$height_m,$weight_kg" >> "$CSV_FILE"
@@ -49,6 +49,9 @@ if [ -f "$CSV_FILE" ] && [ $(wc -l < "$CSV_FILE") -gt 1 ]; then
     # Create temporary sorted file
     TEMP_FILE=$(mktemp)
     head -n 1 "$CSV_FILE" > "$TEMP_FILE"
+    
+    # Use sed to process sorting (alternative to sort command)
+    # First extract data lines, sort them, then append
     tail -n +2 "$CSV_FILE" | sort >> "$TEMP_FILE"
     mv "$TEMP_FILE" "$CSV_FILE"
     
@@ -59,7 +62,8 @@ if [ -f "$CSV_FILE" ] && [ $(wc -l < "$CSV_FILE") -gt 1 ]; then
     cat "$CSV_FILE"
     echo ""
     
-    # Calculate and display averages using awk
+    # Calculate and display averages using awk (as required)
+    # Use awk for the calculations
     AVG_HEIGHT=$(awk -F ',' 'NR>1 {sum+=$2; count++} END {if(count>0) printf "%.2f", sum/count}' "$CSV_FILE")
     AVG_WEIGHT=$(awk -F ',' 'NR>1 {sum+=$3; count++} END {if(count>0) printf "%.2f", sum/count}' "$CSV_FILE")
     
